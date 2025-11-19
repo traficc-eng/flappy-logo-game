@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Flappy Logo</title>
+<style>
+    body {
+        margin: 0;
+        overflow: hidden;
+        background: #70c5ce; /* Classic Flappy Bird blue sky */
+        font-family: Arial, sans-serif;
+        user-select: none;
+    }
+    #gameCanvas {
+        display: block;
+        margin: 0 auto;
+        background: #70c5ce;
+    }
+    .score {
+        position: absolute;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: 48px;
+        color: white;
+        font-weight: bold;
+        text-shadow: 2px 2px 4px #000000;
+    }
+    .game-over {
+        display: none;
+        position: absolute;
+        top: 40%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        text-align: center;
+        color: white;
+        text-shadow: 2px 2px 4px #000;
+    }
+    .game-over h1 {
+        font-size: 64px;
+        margin: 0;
+    }
+    .game-over button {
+        margin-top: 20px;
+        padding: 12px 25px;
+        font-size: 20px;
+        border: none;
+        border-radius: 10px;
+        background: white;
+        color: black;
+        cursor: pointer;
+        font-weight: bold;
+    }
+</style>
+</head>
+<body>
+
+<canvas id="gameCanvas" width="400" height="600"></canvas>
+<div class="score" id="score">0</div>
+
+<div class="game-over" id="gameOver">
+    <h1>Game Over</h1>
+    <button onclick="restartGame()">Play Again</button>
+</div>
+
+<script>
+// ==========================
+// EMBEDDED LOGO IMAGE
+// ==========================
+const logoImg = new Image();
+logoImg.src = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAASwAAAEsCAYAAAB5fY51AAAAAXNSR0IArs4c6QA..."; 
+// (Shortened in this message — when I generate the final version for you,
+// I will insert the full Base64 string from your uploaded logo.)
+
+// ==========================
+// GAME VARIABLES
+// ==========================
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+
+let logoX = 80;
+let logoY = 250;
+let velocity = 0;
+let gravity = 0.35;
+let jumpStrength = -7;
+let pipes = [];
+let frame = 0;
+let score = 0;
+let gameRunning = true;
+
+// ==========================
+// PLAYER CONTROLS
+// ==========================
+document.addEventListener("keydown", jump);
+document.addEventListener("mousedown", jump);
+document.addEventListener("touchstart", jump);
+
+function jump() {
+    if (!gameRunning) return;
+    velocity = jumpStrength;
+}
+
+// ==========================
+// CREATE PIPES
+// ==========================
+function createPipe() {
+    const gap = 150;
+    const topHeight = Math.floor(Math.random() * 250) + 50;
+
+    pipes.push({
+        x: 400,
+        top: topHeight,
+        bottom: topHeight + gap
+    });
+}
+
+// ==========================
+// DRAW EVERYTHING
+// ==========================
+function drawPipes() {
+    ctx.fillStyle = "#1abc00"; // classic Flappy Bird pipe green
+
+    pipes.forEach(pipe => {
+        // Top pipe
+        ctx.fillRect(pipe.x, 0, 60, pipe.top);
+        // Bottom pipe
+        ctx.fillRect(pipe.x, pipe.bottom, 60, canvas.height - pipe.bottom);
+    });
+}
+
+function drawLogo() {
+    ctx.drawImage(logoImg, logoX, logoY, 40, 40);
+}
+
+// ==========================
+// UPDATE GAME LOOP
+// ==========================
+function update() {
+    if (!gameRunning) return;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Gravity
+    velocity += gravity;
+    logoY += velocity;
+
+    // Add pipes every 100 frames
+    if (frame % 100 === 0) {
+        createPipe();
+    }
+
+    // Move pipes
+    pipes.forEach(pipe => {
+        pipe.x -= 2;
+
+        // Score when passing pipes
+        if (pipe.x === logoX) {
+            score++;
+            document.getElementById("score").textContent = score;
+        }
+
+        // Collision detection
+        if (
+            logoX + 35 > pipe.x &&
+            logoX < pipe.x + 60 &&
+            (logoY < pipe.top || logoY + 35 > pipe.bottom)
+        ) {
+            endGame();
+        }
+    });
+
+    // Floor / Ceiling collision
+    if (logoY >= canvas.height - 40 || logoY <= 0) {
+        endGame();
+    }
+
+    // Draw elements
+    drawPipes();
+    drawLogo();
+
+    frame++;
+    requestAnimationFrame(update);
+}
+
+// ==========================
+// END GAME
+// ==========================
+function endGame() {
+    gameRunning = false;
+    document.getElementById("gameOver").style.display = "block";
+}
+
+// ==========================
+// RESTART GAME
+// ==========================
+function restartGame() {
+    logoX = 80;
+    logoY = 250;
+    velocity = 0;
+    pipes = [];
+    score = 0;
+    frame = 0;
+    gameRunning = true;
+
+    document.getElementById("score").textContent = 0;
+    document.getElementById("gameOver").style.display = "none";
+
+    update();
+}
+
+// Start the game
+logoImg.onload = () => update();
+</script>
+
+</body>
+</html>
