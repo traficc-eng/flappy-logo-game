@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Flappy Logo - Traficc (Fixed + Leaderboard)</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  :root { --bg:#70c5ce; }
+  html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--bg);}
+  #gameCanvas{display:block;margin:0 auto;background:linear-gradient(#70c5ce,#a0e0e8);border-radius:6px;box-shadow:0 8px 20px rgba(0,0,0,0.2)}
+  .score{position:absolute;top:20px;left:50%;transform:translateX(-50%);font-size:42px;color:#fff;font-weight:700;text-shadow:2px 2px 4px rgba(0,0,0,0.6)}
+  #startScreen,#gameOverScreen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;background:rgba(0,0,0,0.45);color:#fff}
+  .panel{background:rgba(255,255,255,0.06);padding:18px;border-radius:12px;text-align:center;backdrop-filter:blur(4px)}
+  button{margin-top:12px;padding:10px 18px;font-size:16px;border-radius:10px;border:none;cursor:pointer;font-weight:700}
+  #startScreen button,#gameOverScreen button{background:#fff;color:#000}
+  .small{font-size:14px;opacity:0.95}
+  #leaderboard{
+    position: absolute; right: 16px; top: 80px;
+    background: rgba(255,255,255,0.06); padding: 12px; border-radius:8px; color:white;
+    max-width:220px; font-size:14px;
+  }
+  #leaderboard h3{margin:0 0 8px 0;font-size:16px}
+  #leaderboard ol{padding-left:18px;margin:6px 0;}
+  #leaderboard button{margin-top:8px;padding:6px 10px;font-size:13px}
+  @media (max-width:480px){ #gameCanvas{width:320px;height:520px} .score{font-size:34px} #leaderboard{display:none} }
+</style>
+</head>
+<body>
+
+<canvas id="gameCanvas" width="400" height="600"></canvas>
+<div class="score" id="score">0</div>
+
+<!-- Leaderboard floated -->
+<div id="leaderboard" aria-live="polite">
+  <h3>Leaderboard</h3>
+  <ol id="lbList"></ol>
+  <button id="clearLb">Clear Leaderboard</button>
+</div>
+
+<!-- START SCREEN -->
+<div id="startScreen" class="panel">
+  <h1 style="font-size:44px;margin:0">Flappy Logo</h1>
+  <p class="small" style="margin:8px 0 0">Click / Tap / Space to fly</p>
+  <button id="startBtn">Start Game</button>
+  <p class="small" style="margin:8px 0 0">High Score: <span id="startHigh">0</span></p>
+</div>
+
+<!-- GAME OVER SCREEN -->
+<div id="gameOverScreen" class="panel" style="display:none">
+  <h2 style="margin:0 0 8px">Game Over</h2>
+  <p class="small" id="finalScore">Score: 0</p>
+  <p class="small" id="finalHigh">High Score: 0</p>
+  <div style="margin-top:8px">
+    <input id="playerName" placeholder="Your name" style="padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.12)" />
+    <button id="saveScore">Save Score</button>
+  </div>
+  <div style="margin-top:8px">
+    <button id="replayBtn">Play Again</button>
+  </div>
+</div>
+
+<script>
+/*
+  FIX NOTES:
+  - Replace the placeholders below with real base64 data URIs if you want embedded assets:
+    * logoSrc = "data:image/png;base64,__LOGO_BASE64_HERE__"
+    * jumpAudioSrc = "data:audio/wav;base64,__JUMP_WAV_BASE64__"
+    * hitAudioSrc  = "data:audio/wav;base64,__HIT_WAV_BASE64__"
+  - If you want me to embed them for you I can write the file directly (I already have your uploaded logo).
+*/
+
+// ---- ASSET PLACEHOLDERS ----
+// Put the full base64 strings (no line breaks) in these variables:
+const logoSrc = "data:image/png;base64,__LOGO_BASE64_HERE__";
+const jumpAudioSrc = "data:audio/wav;base64,__JUMP_WAV_BASE64__";
+const hitAudioSrc  = "data:audio/wav;base64,__HIT_WAV_BASE64__";
+
+// ---- Canvas and DOM refs ----
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+const scoreEl = document.getElementById("score");
+const startScreen = document.getElementById("startScreen");
+const startBtn = document.getElementById("startBtn");
+const startHigh = document.getElementById("startHigh");
+const gameOverScreen = document.getElementById("gameOverScreen");
+const finalScore = document.getElementById("finalScore");
+const finalHigh = document.getElementById("finalHigh");
+const replayBtn = document.getElementById("replayBtn");
+const saveScoreBtn = document.getElementById("saveScore");
+const playerNameInput = document.getElementById("playerName");
+const lbList = document.getElementById("lbList");
+const clearLbBtn = document.getElementById("clearLb");
+
+// ---- Game variables ----
+const W = canvas.width, H = canvas.height;
+let x = 80, y = 250, vel = 0;
+const gravity = 0.36;
+const jumpStrength = -8.2;
+let pipes = [];
+let frame = 0;
+let score = 0;
+let running = false;
+const pipeWidth = 64;
+const gapSize = 150;
+
+let highScore = parseInt(localStorage.getItem("flappyHighScore") || "0", 10);
+startHigh.textContent = highScore;
+
+// ---- Load logo and sounds safely ----
+const logoImg = new Image();
+logoImg.onload = () => { /* ready */ };
+logoImg.onerror = (e) => { console.warn("Logo failed to load (check base64).", e); };
+logoImg.src = logoSrc;
+
+let jumpSound = null, hitSound = null;
+try {
+  jumpSound = new Audio(jumpAudioSrc);
+  hitSound = new Audio(hitAudioSrc);
+} catch (err) {
+  console.warn("Sound creation failed (base64 might be missing).", err);
+}
+
+// ---- Input handling (start + jump) ----
+function safePlay(sound) {
+  if (!sound) return;
+  try { sound.currentTime = 0; sound.play(); } catch (e) { /* ignore */ }
+}
+
+function onJump(e){
+  if (!running) return;
+  vel = jumpStrength;
+  safePlay(jumpSound);
+}
+
+window.addEventListener("keydown", (e) => { if (e.code === "Space") onJump(); });
+window.addEventListener("mousedown", onJump);
+window.addEventListener("touchstart", (e) => { onJump(); e.preventDefault(); }, {passive:false});
+
+// ---- Pipes ----
+function createPipe() {
+  const top = Math.floor(Math.random() * (H - gapSize - 120)) + 40;
+  pipes.push({ x: W, top: top, bottom: top + gapSize });
+}
+
+// ---- Drawing textured pipes ----
+function roundRect(ctx, x, y, w, h, r, fill) {
+  ctx.beginPath();
+  ctx.moveTo(x+r, y);
+  ctx.arcTo(x+w, y,   x+w, y+h, r);
+  ctx.arcTo(x+w, y+h, x,   y+h, r);
+  ctx.arcTo(x,   y+h, x,   y,   r);
+  ctx.arcTo(x,   y,   x+w, y,   r);
+  ctx.closePath();
+  ctx.fillStyle = fill;
+  ctx.fill();
+}
+
+function drawPipes(){
+  for (let i=0;i<pipes.length;i++){
+    const p = pipes[i];
+    const grad = ctx.createLinearGradient(p.x, 0, p.x + pipeWidth, 0);
+    grad.addColorStop(0, "#157a12");
+    grad.addColorStop(0.5, "#1fbf37");
+    grad.addColorStop(1, "#0f6810");
+
+    roundRect(ctx, p.x, 0, pipeWidth, p.top, 6, grad);
+    roundRect(ctx, p.x, p.bottom, pipeWidth, H - p.bottom, 6, grad);
+
+    // subtle stripes
+    ctx.save();
+    ctx.globalAlpha = 0.12;
+    for (let s=0;s<6;s++){
+      const sx = p.x + s*(pipeWidth/6) + 2;
+      ctx.fillStyle = "rgba(0,0,0,0.06)";
+      ctx.fillRect(sx, 0, 6, p.top);
+      ctx.fillRect(sx, p.bottom, 6, H - p.bottom);
+    }
+    ctx.restore();
+
+    // rims and shading
+    ctx.fillStyle = "#2a8b2e";
+    ctx.fillRect(p.x - 2, p.top - 14, pipeWidth + 4, 14);
+    ctx.fillRect(p.x - 2, p.bottom, pipeWidth + 4, 14);
+    ctx.fillStyle = "rgba(0,0,0,0.12)";
+    ctx.fillRect(p.x + pipeWidth - 6, 0, 6, p.top);
+    ctx.fillRect(p.x + pipeWidth - 6, p.bottom, 6, H - p.bottom);
+  }
+}
+
+// ---- Draw logo with rotation ----
+function drawLogo(){
+  ctx.save();
+  const w = 44, h = 44;
+  const rot = Math.max(-0.6, Math.min(0.8, vel * 0.06));
+  ctx.translate(x + w/2, y + h/2);
+  ctx.rotate(rot);
+  ctx.drawImage(logoImg, -w/2, -h/2, w, h);
+  ctx.restore();
+}
+
+// ---- Game loop ----
+function loop(){
+  if (!running) return;
+  ctx.clearRect(0,0,W,H);
+
+  // background
+  const bg = ctx.createLinearGradient(0,0,0,H);
+  bg.addColorStop(0,"#8fe0ea");
+  bg.addColorStop(1,"#70c5ce");
+  ctx.fillStyle = bg;
+  ctx.fillRect(0,0,W,H);
+
+  vel += gravity;
+  y += vel;
+
+  if (frame % 95 === 0) createPipe();
+
+  for (let i=pipes.length-1;i>=0;i--){
+    const p = pipes[i];
+    p.x -= 2.6;
+
+    if (!p.passed && p.x + pipeWidth < x){
+      score++;
+      p.passed = true;
+      scoreEl.textContent = score;
+    }
+
+    if (x + 40 > p.x && x < p.x + pipeWidth){
+      if (y < p.top || y + 40 > p.bottom){
+        endGame();
+      }
+    }
+
+    if (p.x + pipeWidth < -20) pipes.splice(i,1);
+  }
+
+  if (y + 40 >= H || y <= -10) endGame();
+
+  drawPipes();
+  drawLogo();
+
+  frame++;
+  requestAnimationFrame(loop);
+}
+
+// ---- End game / leaderboard saving ----
+function endGame(){
+  if (!running) return;
+  running = false;
+  safePlay(hitSound);
+
+  if (score > highScore){
+    highScore = score;
+    localStorage.setItem("flappyHighScore", highScore);
+  }
+
+  finalScore.textContent = "Score: " + score;
+  finalHigh.textContent = "High Score: " + highScore;
+
+  // show game over screen (but allow save)
+  gameOverScreen.style.display = "block";
+  // focus name input
+  setTimeout(()=>playerNameInput.focus(), 100);
+}
+
+// ---- Start / Restart handlers ----
+startBtn.addEventListener("click", () => {
+  try {
+    startScreen.style.display = "none";
+    gameOverScreen.style.display = "none";
+    pipes = []; score = 0; frame = 0; y = 250; vel = 0;
+    scoreEl.textContent = "0";
+    running = true;
+    loop();
+  } catch (err) {
+    console.error("Failed to start game:", err);
+    alert("An error occurred starting the game (see console).");
+  }
+});
+
+replayBtn.addEventListener("click", () => {
+  gameOverScreen.style.display = "none";
+  pipes = []; score = 0; frame = 0; y = 250; vel = 0;
+  scoreEl.textContent = "0";
+  running = true;
+  loop();
+});
+
+// ---- Leaderboard logic (localStorage) ----
+const LB_KEY = "flappyLeaderboard_v1"; // can version
+function loadLeaderboard(){
+  try {
+    const raw = localStorage.getItem(LB_KEY) || "[]";
+    return JSON.parse(raw);
+  } catch (e) {
+    console.warn("Failed to parse leaderboard:", e);
+    return [];
+  }
+}
+function saveLeaderboard(list){
+  localStorage.setItem(LB_KEY, JSON.stringify(list));
+}
+function addToLeaderboard(name, score){
+  const list = loadLeaderboard();
+  list.push({name: name || "Anon", score: Number(score), when: Date.now()});
+  list.sort((a,b)=>b.score - a.score || a.when - b.when);
+  // keep top 20
+  const top = list.slice(0,20);
+  saveLeaderboard(top);
+  renderLeaderboard();
+}
+function renderLeaderboard(){
+  const list = loadLeaderboard();
+  lbList.innerHTML = "";
+  const top = list.slice(0,5);
+  if (top.length === 0){
+    lbList.innerHTML = "<li><small>No scores yet</small></li>";
+    return;
+  }
+  top.forEach(item=>{
+    const li = document.createElement("li");
+    li.textContent = item.name + " — " + item.score;
+    lbList.appendChild(li);
+  });
+}
+clearLbBtn.addEventListener("click", () => {
+  if (!confirm("Clear the leaderboard?")) return;
+  saveLeaderboard([]);
+  renderLeaderboard();
+});
+saveScoreBtn.addEventListener("click", () => {
+  const name = (playerNameInput.value || "").trim() || "Anon";
+  addToLeaderboard(name, score);
+  playerNameInput.value = "";
+  gameOverScreen.style.display = "none";
+  startScreen.style.display = "flex";
+  startScreen.classList.remove("hidden");
+});
+
+// on load render leaderboard
+renderLeaderboard();
+
+// --- helpful console hook so you can debug if something fails ---
+window.__flappy_debug = {
+  restart: () => { running = false; replayBtn.click(); },
+  dump: () => ({score, highScore, pipes, frame})
+};
+
+</script>
+</body>
+</html>
